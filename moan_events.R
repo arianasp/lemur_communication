@@ -11,11 +11,11 @@ cols_sex <- c('darkblue','darkred')
 
 
 #DIRECTORY
-setwd('~/Dropbox/lemur_communication/rawdata_csv/')
+setwd('~/Dropbox/lemur_communication')
 
 #LOAD DATA
-ids <- read.csv('ids_matrix.csv')
-calls <- read.csv('calls_df_new.csv')
+ids <- read.csv('rawdata_csv/ids_matrix.csv')
+calls <- read.csv('Matrixes_Updated/calls_df_20261021.csv')
 
 #PROCESS
 calls$t <- as.POSIXct(calls$time, tz = 'UTC')
@@ -79,11 +79,14 @@ for(i in 1:nrow(events)){
 }
 
 #events matrix (rows = inds, cols = events, T = participated, F = did not)
-events_mat <- matrix(0, nrow = nrow(ids), ncol = nrow(events))
+events_mat <- response_mat <- matrix(0, nrow = nrow(ids), ncol = nrow(events))
 for(i in 1:nrow(events)){
   particip <- events$participants[i][[1]]
+  init <- which(ids$id_code == events$initiator[i])
   idxs <- which(ids$id_code %in% particip)
   events_mat[idxs,i] <- 1
+  idxs_resp <- setdiff(idxs, init)
+  response_mat[idxs_resp,i] <- 1
 }
 
 #summary statistics
@@ -93,9 +96,30 @@ ids$tot_calls <- as.numeric(n_calls[match(as.character(ids$id_code), names(n_cal
 n_inits <- table(events$initiator)
 ids$events_initiated <- as.numeric(n_inits[match(as.character(ids$id_code), names(n_inits))])
 ids$events_participated <- rowSums(events_mat)
+ids$events_responded <- rowSums(response_mat)
+
+#probability of response given a particular initiator
+#row = initiator, col = responder
+p_resp <- matrix(NA, nrow = nrow(ids), ncol = nrow(ids))
+for(i in 1:nrow(ids)){
+  events_ind <- events_mat[,which(events$initiator==ids$id_code[i])]
+  events_ind[i,] <- NA #don't count responding to yourself
+  if(ncol(events_ind)>0){
+    p_resp[i,] <- rowMeans(events_ind)
+  }
+}
+
+#Overall probability for each initiator was responded to (averaged across all responders)
+ids$p_responded_to <- rowMeans(p_resp, na.rm=T)
+
+#Overall probability that each individual responded to someone else (averaged across all initiators)
+ids$p_responds <- colMeans(p_resp, na.rm=T)
 
 #sort by sex and then age
 ids_sort <- ids[order(ids$sex, ids$age, decreasing = T),]
+p_resp_sort <- p_resp[order(ids$sex, ids$age, decreasing = T),order(ids$sex, ids$age, decreasing = T)]
+
+#PLOTS
 
 #make barplots for total number of calls, event participation, and event initiation
 quartz()
@@ -104,20 +128,7 @@ barplot(ids_sort$events_initiated, horiz=T, names.arg = ids_sort$id_code, las = 
 barplot(ids_sort$events_participated, horiz=T, names.arg = ids_sort$id_code, las = 2, col = ids_sort$color, cex.names = .8, xlab = '# events participated', cex.lab=1.5)
 barplot(ids_sort$tot_calls, horiz=T, names.arg = ids_sort$id_code, las = 2, col = ids_sort$color, cex.names = .8, xlab = 'total # calls', cex.lab=1.5)
 
-#probability of response given a particular initiator
-#row = initiator, col = responder
-p_resp <- matrix(NA, nrow = nrow(ids), ncol = nrow(ids))
-for(i in 1:nrow(ids)){
-  events_ind <- events_mat[,which(events$initiator==ids$id_code[i])]
-  events_ind[i,] <- NA #don't respond to yourself
-  if(ncol(events_ind)>0){
-    p_resp[i,] <- rowMeans(events_ind)
-  }
-}
-
-p_responded_to <- rowMeans(p_resp, na.rm=T)
-p_responds <- colMeans(p_resp, na.rm=T)
-
-par(mfrow=c(1,1))
-image.plot(p_resp)
-     
+quartz()
+image.plot(p_resp_sort, xaxt = 'n', yaxt = 'n', col = viridis(256))
+Map(axis, side=2, at=seq(0,1,length.out = nrow(p_resp_sort)), col.axis=ids_sort$color, labels=ids_sort$id, lwd=0, las=1)
+Map(axis, side=1, at=seq(0,1,length.out = nrow(p_resp_sort)), col.axis=ids_sort$color, labels=ids_sort$id_code, lwd=0, las=2)
